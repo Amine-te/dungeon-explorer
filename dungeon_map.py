@@ -49,6 +49,8 @@ class DungeonMap:
         self.enemy_spawns: list[tuple[float, float, str]] = []
         self.item_spawns: list[tuple[float, float, str]] = []
         self.door_positions: set[tuple[int, int]] = set()
+        
+        self.visited_cells: set[tuple[int, int]] = set()
 
         self._generate()
 
@@ -117,6 +119,14 @@ class DungeonMap:
             return f'Press E to pick up {item.item.label}'
         door = self.find_nearby_door(px, py)
         return self.get_door_prompt(door)
+        
+    def update_visited(self, px, py, radius=5):
+        ix, iy = int(px), int(py)
+        for y in range(iy - radius, iy + radius + 1):
+            for x in range(ix - radius, ix + radius + 1):
+                if 0 <= x < self.width and 0 <= y < self.height:
+                    if (x - ix)**2 + (y - iy)**2 <= radius**2:
+                        self.visited_cells.add((x, y))
 
     # ── Generation pipeline ──────────────────────────────────────────────
     def _generate(self):

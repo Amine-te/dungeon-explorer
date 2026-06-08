@@ -38,6 +38,10 @@ class Player:
 
         # Movement tracking
         self.is_moving = False
+        
+        # Camera modifiers
+        self.head_bob_phase = 0.0
+        self.screen_shake = 0.0
 
         # Dodge
         self.dodge_timer = 0
@@ -64,6 +68,11 @@ class Player:
         # Fade damage flash
         if self.damage_flash > 0:
             self.damage_flash = max(0.0, self.damage_flash - dt * 0.003)
+
+        if self.is_moving:
+            self.head_bob_phase += dt * 0.015
+        if self.screen_shake > 0:
+            self.screen_shake = max(0.0, self.screen_shake - dt * 0.2)
 
         # Attack animation timer
         if self.is_attacking:
@@ -202,9 +211,10 @@ class Player:
         return True
 
     def attack_enemies(self, enemies, current_time, sound_mgr, dungeon_map=None):
-        """Damage enemies in attack range and facing direction."""
+        """Damage enemies in attack range and facing direction. Returns True if hit."""
         if not self.try_attack(current_time, sound_mgr):
-            return
+            return False
+        hit_any = False
         for enemy in enemies:
             if not enemy.alive:
                 continue
@@ -218,13 +228,16 @@ class Player:
             if abs(delta) < math.pi / 3:
                 enemy.take_damage(PLAYER_ATTACK_DAMAGE, sound_mgr, player=self,
                                   dungeon_map=dungeon_map)
+                hit_any = True
                 if not enemy.alive:
                     self.enemies_killed += 1
                     self.score += 50
+        return hit_any
 
     def take_damage(self, amount, sound_mgr):
         self.health = max(0, self.health - amount)
         self.damage_flash = 1.0
+        self.screen_shake = 40.0
         sound_mgr.play('player_damage')
 
     @property

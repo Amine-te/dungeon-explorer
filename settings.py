@@ -30,7 +30,7 @@ SCREEN_DIST = HALF_WIDTH / math.tan(HALF_FOV)
 TEXTURE_SIZE = 64
 
 # ─── Player ──────────────────────────────────────────────────────────────────
-PLAYER_SPEED = 0.008
+PLAYER_SPEED = 0.005
 PLAYER_SPRINT_MULT = 1.6
 PLAYER_ROT_SPEED = 0.0012                  # mouse sensitivity (tweaked)
 PLAYER_SIZE = 0.15                         # collision half-size in tiles

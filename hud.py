@@ -16,9 +16,11 @@ from settings import (
     COLOR_MINIMAP_PLAYER, COLOR_MINIMAP_CRYSTAL, COLOR_MINIMAP_ITEM,
     PLAYER_MAX_HEALTH, PLAYER_STAMINA_MAX,
     PLAYER_DODGE_DURATION, PLAYER_DODGE_COOLDOWN,
+    PLAYER_ATTACK_COOLDOWN,
     FIREBALL_COOLDOWN, INVENTORY_SIZE,
 )
 from sprites import get_item_icon
+from model_renderer import bake_weapon_swing
 
 
 class HUD:
@@ -53,8 +55,10 @@ class HUD:
             (SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA
         )
 
-        # Attack overlay
-        self.attack_surface = self._create_attack_overlay()
+        # Attack weapon frames
+        knife_path = os.path.join(ASSETS_DIR, 'models', 'props', 'weapons', 'combat_knife.glb')
+        self.weapon_frames = bake_weapon_swing(knife_path, size=500)
+        self.attack_surface = self._create_attack_overlay() if not self.weapon_frames else None
 
         # Vignette (darkened edges for atmosphere)
         self.vignette = self._create_vignette()
@@ -142,9 +146,24 @@ class HUD:
             self.damage_surface.fill((180, 0, 0, a))
             self.screen.blit(self.damage_surface, (0, 0))
 
-        # Attack animation
+        # Attack animation (Weapon)
         if player.is_attacking:
-            self.screen.blit(self.attack_surface, (0, 0))
+            elapsed = current_time - player.attack_timer
+            ratio = elapsed / PLAYER_ATTACK_COOLDOWN
+            if self.weapon_frames:
+                frame_idx = int(ratio * len(self.weapon_frames))
+                if frame_idx >= len(self.weapon_frames):
+                    frame_idx = len(self.weapon_frames) - 1
+                img = self.weapon_frames[frame_idx]
+                # Draw in bottom-right corner
+                self.screen.blit(img, (SCREEN_WIDTH - img.get_width() + 100, SCREEN_HEIGHT - img.get_height() + 50))
+            elif self.attack_surface:
+                self.screen.blit(self.attack_surface, (0, 0))
+        elif self.weapon_frames:
+            # Idle weapon state
+            img = self.weapon_frames[0]
+            bob = math.sin(current_time * 0.005) * 10 if player.is_moving else 0
+            self.screen.blit(img, (SCREEN_WIDTH - img.get_width() + 120, SCREEN_HEIGHT - img.get_height() + 150 + bob))
 
         self._draw_health_bar(player, current_time)
         self._draw_stamina_bar(player)
@@ -316,9 +335,12 @@ class HUD:
                          border_radius=4)
         self.screen.blit(bg, (mx - 3, my - 3))
 
-        # Tiles
+        # Tiles - Fog of War: only draw visited cells
+        visited = dungeon_map.visited_cells
         for gy in range(dungeon_map.height):
             for gx in range(dungeon_map.width):
+                if (gx, gy) not in visited:
+                    continue  # Fog: skip unvisited
                 if dungeon_map.grid[gy][gx] != 0:
                     pygame.draw.rect(self.screen, COLOR_MINIMAP_WALL,
                                      (mx + gx * tile, my + gy * tile,
@@ -328,27 +350,30 @@ class HUD:
                                      (mx + gx * tile, my + gy * tile,
                                       tile, tile))
 
-        # Crystals
+        # Crystals (only show if cell visited)
         for c in crystals:
-            if not c.collected:
+            if not c.collected and (int(c.x), int(c.y)) in visited:
                 px = mx + int(c.x * tile)
                 py = my + int(c.y * tile)
                 pygame.draw.circle(self.screen, COLOR_MINIMAP_CRYSTAL,
                                    (px, py), max(2, tile // 2))
 
-        # Items on ground
+        # Items on ground (only show if cell visited)
         if world_items:
             for wp in world_items:
-                if wp.picked_up:
+                if wp.picked_up or (int(wp.x), int(wp.y)) not in visited:
                     continue
                 px = mx + int(wp.x * tile)
                 py = my + int(wp.y * tile)
                 pygame.draw.circle(self.screen, COLOR_MINIMAP_ITEM,
                                    (px, py), max(2, tile // 2))
 
-        # Enemies (type-coloured)
+        # Enemies — only show in a small radius around the player
+        player_ix, player_iy = int(player.x), int(player.y)
         for e in enemies:
-            if e.alive:
+            if not e.alive:
+                continue
+            if abs(int(e.x) - player_ix) <= 6 and abs(int(e.y) - player_iy) <= 6:
                 px = mx + int(e.x * tile)
                 py = my + int(e.y * tile)
                 color = getattr(e, 'minimap_color', (255, 60, 60))

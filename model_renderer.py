@@ -113,10 +113,14 @@ def _normalize_vertices(vertices: np.ndarray, target_height: float,
     return v
 
 
-def _rotate_y(vertices: np.ndarray, angle: float) -> np.ndarray:
-    c, s = math.cos(angle), math.sin(angle)
-    rot = np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
-    return vertices @ rot.T
+def _rotate_3d(vertices: np.ndarray, yaw: float, pitch: float, roll: float) -> np.ndarray:
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cr, sr = math.cos(roll), math.sin(roll)
+    Ry = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cp, -sp], [0.0, sp, cp]])
+    Rz = np.array([[cr, -sr, 0.0], [sr, cr, 0.0], [0.0, 0.0, 1.0]])
+    return vertices @ (Rz @ Rx @ Ry).T
 
 
 def _sample_color(texture, uvs, solid_color):
@@ -132,10 +136,10 @@ def _sample_color(texture, uvs, solid_color):
 
 
 def _render_mesh(mesh: MeshData, yaw: float, size: int,
-                 target_height: float = 1.0) -> pygame.Surface:
-    """Software-rasterise a mesh from a yaw angle into an RGBA surface."""
+                 target_height: float = 1.0, pitch: float = 0.0, roll: float = 0.0) -> pygame.Surface:
+    """Software-rasterise a mesh into an RGBA surface."""
     verts = _normalize_vertices(mesh.vertices, target_height)
-    verts = _rotate_y(verts, yaw)
+    verts = _rotate_3d(verts, yaw, pitch, roll)
 
     # Orthographic front view: X → screen X, Y → screen Y, Z → depth
     xs = verts[:, 0]
@@ -248,6 +252,34 @@ def get_crystal_frames() -> list[pygame.Surface] | None:
     if os.path.exists(GEM_MODEL_PATH):
         return bake_spin_frames(GEM_MODEL_PATH)
     return None
+
+def bake_weapon_swing(path: str, size: int = 256) -> list[pygame.Surface] | None:
+    """Bake 5 frames of a knife swinging."""
+    key = ('weapon_swing', path, size)
+    if key in _sprite_cache:
+        return _sprite_cache[key]
+
+    mesh = load_mesh(path)
+    if mesh is None:
+        return None
+
+    result = []
+    # Knife slash animation keyframes (yaw, pitch, roll)
+    # Start: held up/back, Mid: slashing down across screen, End: finished slice
+    keyframes = [
+        (0.5, 0.2, -0.2),    # Ready
+        (0.3, 0.5, -0.4),    # Winding up
+        (0.0, 1.2, -0.8),    # Fast slash!
+        (-0.3, 1.6, -1.0),   # Follow through
+        (-0.5, 1.7, -1.1),   # Resting
+    ]
+    for yaw, pitch, roll in keyframes:
+        # Scale it up slightly larger than default 1.0
+        surf = _render_mesh(mesh, yaw=yaw, pitch=pitch, roll=roll, size=size, target_height=1.4)
+        result.append(surf)
+
+    _sprite_cache[key] = result
+    return result
 
 
 def get_enemy_sprite(model_path: str | None = None) -> pygame.Surface | None:

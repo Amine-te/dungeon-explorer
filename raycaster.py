@@ -198,8 +198,16 @@ class Raycaster:
             darkness = np.minimum(255, darkness + torch_boost)
         return (colors * darkness[:, np.newaxis] // 255).astype(np.uint8)
 
+    def _get_pitch_offset(self, player):
+        offset = int(math.sin(player.head_bob_phase) * 15)
+        if player.screen_shake > 0:
+            offset += int(rng.uniform(-player.screen_shake, player.screen_shake))
+        return offset
+
     def _render_floor_ceiling(self, player, current_time):
         """Per-pixel floor/ceiling casting with tiled stone textures."""
+        pitch_offset = self._get_pitch_offset(player)
+        horizon = max(1, min(SCREEN_HEIGHT - 2, HALF_HEIGHT + pitch_offset))
         half_fov = get_effective_half_fov(player, current_time)
         effective_fov = half_fov * 2
         torch_boost = (ITEM_TORCH_BRIGHTNESS
@@ -218,9 +226,12 @@ class Raycaster:
         sin_ray = np.sin(ray_angles)
 
         buf = pygame.surfarray.pixels3d(self.screen)
+        
+        # Clear the single horizon line to black to prevent artifacts
+        buf[:, horizon, :] = 0
 
-        for y in range(HALF_HEIGHT):
-            p = HALF_HEIGHT - y
+        for y in range(horizon):
+            p = horizon - y
             row_dist = (FLOOR_CAST_EYE_Z * SCREEN_HEIGHT) / p
             dist = row_dist / cos_delta
             wx = px + dist * cos_ray
@@ -230,8 +241,8 @@ class Raycaster:
             buf[:, y, :] = self._shade_row(
                 self._ceil_array[tx, ty], dist, torch_boost)
 
-        for y in range(HALF_HEIGHT + 1, SCREEN_HEIGHT):
-            p = y - HALF_HEIGHT
+        for y in range(horizon + 1, SCREEN_HEIGHT):
+            p = y - horizon
             row_dist = (FLOOR_CAST_EYE_Z * SCREEN_HEIGHT) / p
             dist = row_dist / cos_delta
             wx = px + dist * cos_ray
@@ -250,6 +261,7 @@ class Raycaster:
         and populate self.depth_buffer for the sprite pass.
         """
         self._render_floor_ceiling(player, current_time)
+        pitch_offset = self._get_pitch_offset(player)
 
         ox, oy = player.x, player.y
         half_fov = get_effective_half_fov(player, current_time)
@@ -375,6 +387,6 @@ class Raycaster:
                 fog.fill((5, 5, fog_i))
                 col.blit(fog, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
 
-            self.screen.blit(col, (ray * SCALE, HALF_HEIGHT - wall_h // 2))
+            self.screen.blit(col, (ray * SCALE, HALF_HEIGHT + pitch_offset - wall_h // 2))
 
             ray_angle += delta_angle

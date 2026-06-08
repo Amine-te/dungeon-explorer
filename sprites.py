@@ -460,6 +460,11 @@ class Enemy:
         self.attack_cooldown = ENEMY_ATTACK_COOLDOWN * (
             1.5 if difficulty == 'easy' else (0.7 if difficulty == 'hard' else 1.0))
 
+        # Physics & movement
+        self.vx = 0.0
+        self.vy = 0.0
+        self.bob_phase = random.uniform(0, math.pi * 2)
+
         self.state = 'patrol'
         self.facing = random.uniform(0, math.pi * 2)
         self.patrol_angle = random.uniform(0, math.pi * 2)
@@ -478,7 +483,7 @@ class Enemy:
     def minimap_color(self):
         return self.MINIMAP_COLORS.get(self.enemy_type, COLOR_MINIMAP_CRAWLER)
 
-    def update(self, player, dungeon_map, dt, current_time, projectiles=None):
+    def update(self, player, dungeon_map, dt, current_time, projectiles=None, other_enemies=None):
         if not self.alive:
             self.death_anim = min(1.0, self.death_anim + dt * 0.004)
             return
@@ -499,6 +504,8 @@ class Enemy:
             self._do_chase(dx, dy, dist, dungeon_map, dt)
         else:
             self._do_patrol(dungeon_map, dt, current_time)
+
+        self._apply_physics(dt, dungeon_map, other_enemies)
 
     def _try_brute_throw(self, player, dist, dx, dy, current_time, projectiles):
         if dist > ENEMY_CHASE_RANGE or dist < ENEMY_STOP_DISTANCE:
@@ -536,9 +543,8 @@ class Enemy:
             self.patrol_timer = current_time
 
         self._turn_toward(self.patrol_angle, dt, ENEMY_TURN_SPEED * 0.4)
-        move = self.speed * dt * 0.5
-        self._move(math.cos(self.facing) * move, math.sin(self.facing) * move,
-                   dungeon_map)
+        move = self.speed * dt * 0.002
+        self._apply_acceleration(math.cos(self.facing) * move, math.sin(self.facing) * move)
 
     def _do_chase(self, dx, dy, dist, dungeon_map, dt):
         self.state = 'chase'
@@ -553,9 +559,8 @@ class Enemy:
 
         closeness = min(1.0, (dist - ENEMY_STOP_DISTANCE) / 2.5)
         move = (self.speed * ENEMY_CHASE_SPEED_MULT * dt
-                * (0.35 + 0.65 * closeness))
-        self._move(math.cos(self.facing) * move, math.sin(self.facing) * move,
-                   dungeon_map)
+                * (0.0035 + 0.0065 * closeness))
+        self._apply_acceleration(math.cos(self.facing) * move, math.sin(self.facing) * move)
 
     def _do_attack(self, player, current_time, dist, dx, dy, dt, dungeon_map):
         self.state = 'attack'
@@ -564,9 +569,8 @@ class Enemy:
 
         if (dist > ENEMY_STOP_DISTANCE
                 and abs(self._angle_delta(self.facing, target_angle)) < math.pi / 3):
-            creep = self.speed * 0.3 * dt
-            self._move(math.cos(self.facing) * creep, math.sin(self.facing) * creep,
-                       dungeon_map)
+            creep = self.speed * 0.001 * dt
+            self._apply_acceleration(math.cos(self.facing) * creep, math.sin(self.facing) * creep)
 
         if abs(self._angle_delta(self.facing, target_angle)) > ENEMY_ATTACK_ARC:
             return
@@ -575,13 +579,46 @@ class Enemy:
             if player.alive:
                 player.take_damage(self.damage, player._sound_mgr_ref)
 
-    def _move(self, dx, dy, dungeon_map):
-        new_x = self.x + dx
+    def _apply_acceleration(self, dx, dy):
+        self.vx += dx
+        self.vy += dy
+
+    def _apply_physics(self, dt, dungeon_map, other_enemies):
+        # 1. Boids Separation (push away from other enemies)
+        if other_enemies:
+            for other in other_enemies:
+                if other is self or not other.alive:
+                    continue
+                dx = self.x - other.x
+                dy = self.y - other.y
+                dist = math.hypot(dx, dy)
+                if 0 < dist < ENEMY_SIZE * 2.5:
+                    force = (ENEMY_SIZE * 2.5 - dist) / dist * 0.001 * dt
+                    self.vx += dx * force
+                    self.vy += dy * force
+
+        # 2. Integrate velocity
+        new_x = self.x + self.vx * dt
         if not _collides_circle(new_x, self.y, ENEMY_SIZE, dungeon_map):
             self.x = new_x
-        new_y = self.y + dy
+        else:
+            self.vx *= -0.5  # Bounce off walls slightly
+
+        new_y = self.y + self.vy * dt
         if not _collides_circle(self.x, new_y, ENEMY_SIZE, dungeon_map):
             self.y = new_y
+        else:
+            self.vy *= -0.5
+
+        # 3. Apply friction
+        friction = max(0.0, 1.0 - 0.008 * dt)
+        self.vx *= friction
+        self.vy *= friction
+
+        # 4. Walking Bob Animation
+        speed = math.hypot(self.vx, self.vy)
+        if speed > 0.0001:
+            self.bob_phase += speed * dt * 4.0
 
     def _teleport_away(self, player, dungeon_map):
         dx = self.x - player.x
@@ -598,6 +635,16 @@ class Enemy:
         self.health -= amount
         self.hurt_timer = 150
         sound_mgr.play('enemy_hit')
+        
+        # Apply knockback
+        if player:
+            dx = self.x - player.x
+            dy = self.y - player.y
+            dist = math.hypot(dx, dy)
+            if dist > 0:
+                self.vx += (dx / dist) * 0.04
+                self.vy += (dy / dist) * 0.04
+
         if (self.enemy_type == ENEMY_TYPE_SHADE and player is not None
                 and dungeon_map is not None and self.alive):
             self._teleport_away(player, dungeon_map)
@@ -666,7 +713,8 @@ class SpriteRenderer:
             dy = e.y - player.y
             dist = math.sqrt(dx * dx + dy * dy)
             alpha = 1.0 - e.death_anim if not e.alive else 1.0
-            sprite_list.append((dist, e.current_image, dx, dy, 0, alpha, 0.7))
+            bob = math.sin(e.bob_phase) * 35 if e.alive else 0
+            sprite_list.append((dist, e.current_image, dx, dy, bob, alpha, 1.0))
 
         sprite_list.sort(key=lambda s: s[0], reverse=True)
 

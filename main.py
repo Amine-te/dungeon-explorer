@@ -52,6 +52,7 @@ class Game:
         self.world_items = []
         self.projectiles = []
         self.current_level = 1
+        self.hit_stop_timer = 0   # ms remaining in hit-stop freeze
 
     # ── Level management ─────────────────────────────────────────────────
     def _start_level(self, level=1):
@@ -123,6 +124,11 @@ class Game:
 
     # ── Event handling ───────────────────────────────────────────────────
     def _handle_event(self, event, current_time):
+        # Forward events to settings panel when open
+        if self.state == STATE_TITLE:
+            if self.title_menu.handle_event(event):
+                return  # settings panel consumed it
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 if self.state == STATE_PLAYING:
@@ -134,9 +140,11 @@ class Game:
 
             if self.state == STATE_PLAYING:
                 if event.key == pygame.K_SPACE:
-                    self.player.attack_enemies(
+                    hit = self.player.attack_enemies(
                         self.enemies, current_time, self.sound_mgr,
                         self.dungeon)
+                    if hit:
+                        self.hit_stop_timer = 45
                 if event.key == pygame.K_f:
                     proj = self.player.try_fireball(current_time, self.sound_mgr)
                     if proj:
@@ -154,9 +162,11 @@ class Game:
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.state == STATE_PLAYING:
                 if event.button == 1:
-                    self.player.attack_enemies(
+                    hit = self.player.attack_enemies(
                         self.enemies, current_time, self.sound_mgr,
                         self.dungeon)
+                    if hit:
+                        self.hit_stop_timer = 45  # 45 ms freeze on hit
                 elif event.button == 3:
                     self.player.try_dodge(current_time)
             elif event.button == 1:
@@ -215,8 +225,26 @@ class Game:
         )
 
     def _update_playing(self, dt, current_time):
+        # Hit-stop: freeze game simulation but keep rendering
+        if self.hit_stop_timer > 0:
+            self.hit_stop_timer = max(0, self.hit_stop_timer - dt)
+            # Only render, skip all logic
+            self.raycaster.cast_rays(self.player, self.dungeon, current_time)
+            self.sprite_renderer.render(
+                self.player, self.crystals, self.enemies,
+                self.raycaster.depth_buffer, current_time,
+                self.projectiles, self.world_items,
+            )
+            self.hud.render(self.player, self.dungeon,
+                            self.crystals, self.enemies, current_time,
+                            self.world_items)
+            return
+
         # Player update
         self.player.update(self.dungeon, dt, current_time)
+        
+        # Update Fog of War based on player position
+        self.dungeon.update_visited(self.player.x, self.player.y)
 
         # Footstep sounds
         if self.player.is_moving:
@@ -229,7 +257,7 @@ class Game:
         # Enemy AI
         for enemy in self.enemies:
             enemy.update(self.player, self.dungeon, dt, current_time,
-                         self.projectiles)
+                         self.projectiles, self.enemies)
 
         # Projectiles
         for proj in self.projectiles:
