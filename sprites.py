@@ -466,6 +466,7 @@ class Enemy:
         self.bob_phase = random.uniform(0, math.pi * 2)
 
         self.state = 'patrol'
+        self._prev_state = 'patrol'
         self.facing = random.uniform(0, math.pi * 2)
         self.patrol_angle = random.uniform(0, math.pi * 2)
         self.patrol_timer = 0
@@ -473,6 +474,9 @@ class Enemy:
         self.projectile_timer = 0
 
         self.hurt_timer = 0
+        self.alert_timer = 0    # ms, shows ! on minimap when > 0
+        self.corpse_timer = 0   # ms alive after death for linger
+        self.death_pos = None   # (x, y) at time of death
         _init_3d_assets()
         models = discover_monster_models()
         self.model_path = random.choice(models) if models else None
@@ -486,10 +490,17 @@ class Enemy:
     def update(self, player, dungeon_map, dt, current_time, projectiles=None, other_enemies=None):
         if not self.alive:
             self.death_anim = min(1.0, self.death_anim + dt * 0.004)
+            if self.death_pos is None:
+                self.death_pos = (self.x, self.y)
+            if self.corpse_timer == 0:
+                self.corpse_timer = current_time
             return
 
+        self._prev_state = self.state
         if self.hurt_timer > 0:
-            self.hurt_timer -= dt
+            self.hurt_timer = max(0, self.hurt_timer - dt)
+        if self.alert_timer > 0:
+            self.alert_timer = max(0, self.alert_timer - dt)
 
         dx = player.x - self.x
         dy = player.y - self.y
@@ -502,6 +513,9 @@ class Enemy:
             self._do_attack(player, current_time, dist, dx, dy, dt, dungeon_map)
         elif dist < ENEMY_CHASE_RANGE:
             self._do_chase(dx, dy, dist, dungeon_map, dt)
+            # Trigger alert flash when first spotting player
+            if self._prev_state == 'patrol':
+                self.alert_timer = 1800
         else:
             self._do_patrol(dungeon_map, dt, current_time)
 

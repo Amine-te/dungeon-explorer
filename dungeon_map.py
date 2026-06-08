@@ -11,6 +11,23 @@ from settings import (
     ITEM_PICKUP_RANGE,
 )
 
+# Room type constants
+ROOM_CRYPT   = 'crypt'
+ROOM_LIBRARY = 'library'
+ROOM_ARMORY  = 'armory'
+ROOM_CAVE    = 'cave'
+ROOM_SHRINE  = 'shrine'
+ROOM_TYPES   = [ROOM_CRYPT, ROOM_LIBRARY, ROOM_ARMORY, ROOM_CAVE, ROOM_SHRINE]
+
+# Wall tint per room type: (r_bias, g_bias, b_bias)  ±  added to darkness calculation
+ROOM_TYPE_TINT = {
+    ROOM_CRYPT:   (-10, -10,  18),   # cold blue-purple
+    ROOM_LIBRARY: ( 20,  10, -15),   # warm amber
+    ROOM_ARMORY:  (-10,  15,  -5),   # steel green
+    ROOM_CAVE:    ( -8,  -5,  -8),   # dirty grey
+    ROOM_SHRINE:  ( 12,  -8,  25),   # mystic violet
+}
+
 
 class Room:
     """Axis-aligned rectangular room."""
@@ -49,8 +66,12 @@ class DungeonMap:
         self.enemy_spawns: list[tuple[float, float, str]] = []
         self.item_spawns: list[tuple[float, float, str]] = []
         self.door_positions: set[tuple[int, int]] = set()
-        
         self.visited_cells: set[tuple[int, int]] = set()
+
+        # New: room types, secrets
+        self.floor_room_type: dict[tuple[int,int], str] = {}   # (gx,gy) -> room type
+        self.secret_walls: set[tuple[int,int]] = set()         # visually solid, passable
+        self.secret_rooms: list[Room] = []
 
         self._generate()
 
@@ -59,6 +80,9 @@ class DungeonMap:
         ix, iy = int(x), int(y)
         if ix < 0 or ix >= self.width or iy < 0 or iy >= self.height:
             return True
+        # Secret walls are passable
+        if (ix, iy) in self.secret_walls:
+            return False
         return self.grid[iy][ix] != 0
 
     def get_wall_type(self, x, y):
@@ -128,12 +152,18 @@ class DungeonMap:
                     if (x - ix)**2 + (y - iy)**2 <= radius**2:
                         self.visited_cells.add((x, y))
 
+    def get_room_type(self, wx, wy):
+        """Return the room type string for a world position, or None."""
+        return self.floor_room_type.get((int(wx), int(wy)))
+
     # ── Generation pipeline ──────────────────────────────────────────────
     def _generate(self):
         self._place_rooms()
         self._connect_rooms()
+        self._assign_room_types()
         self._add_wall_variety()
         self._place_doors()
+        self._place_secret_rooms()
         self._set_spawns()
 
     def _place_rooms(self):
@@ -218,6 +248,80 @@ class DungeonMap:
         for x, y in candidates[:count]:
             self.grid[y][x] = WALL_DOOR
             self.door_positions.add((x, y))
+
+    def _assign_room_types(self):
+        """Give each room a type and tag all its floor tiles."""
+        type_pool = ROOM_TYPES * ((len(self.rooms) // len(ROOM_TYPES)) + 1)
+        random.shuffle(type_pool)
+        for i, room in enumerate(self.rooms):
+            rtype = type_pool[i % len(type_pool)]
+            room.rtype = rtype
+            for ry in range(room.y, room.y + room.h):
+                for rx in range(room.x, room.x + room.w):
+                    self.floor_room_type[(rx, ry)] = rtype
+
+    def _place_secret_rooms(self):
+        """Carve 1-2 hidden rooms behind impassable-looking walls."""
+        if len(self.rooms) < 4:
+            return
+        count = min(2, max(1, self.level // 2))
+        added = 0
+        attempts = 0
+        while added < count and attempts < 80:
+            attempts += 1
+            # Pick a random room wall edge and try to carve outward
+            base = random.choice(self.rooms[2:])
+            side = random.choice(['n', 's', 'e', 'w'])
+            sw = random.randint(3, 5)
+            sh = random.randint(3, 5)
+            if side == 'n':
+                sx, sy = base.cx - sw//2, base.y - sh - 1
+            elif side == 's':
+                sx, sy = base.cx - sw//2, base.y + base.h + 1
+            elif side == 'e':
+                sx, sy = base.x + base.w + 1, base.cy - sh//2
+            else:
+                sx, sy = base.x - sw - 1, base.cy - sh//2
+
+            if sx < 2 or sy < 2 or sx + sw >= self.width-1 or sy + sh >= self.height-1:
+                continue
+            # Must be all walls currently
+            if any(self.grid[sy+dy][sx+dx] == 0
+                   for dy in range(sh) for dx in range(sw)):
+                continue
+
+            secret = Room(sx, sy, sw, sh)
+            self._carve_room(secret)
+            self.secret_rooms.append(secret)
+
+            # The one wall between the base room and secret room is a secret wall
+            if side == 'n':
+                wx, wy = base.cx, base.y - 1
+            elif side == 's':
+                wx, wy = base.cx, base.y + base.h
+            elif side == 'e':
+                wx, wy = base.x + base.w, base.cy
+            else:
+                wx, wy = base.x - 1, base.cy
+
+            if 0 <= wx < self.width and 0 <= wy < self.height:
+                self.secret_walls.add((wx, wy))
+
+            # Tag floor tiles
+            for ry in range(sy, sy + sh):
+                for rx in range(sx, sx + sw):
+                    self.floor_room_type[(rx, ry)] = ROOM_SHRINE
+
+            # Extra loot in the secret room
+            for _ in range(2):
+                lx = random.randint(sx+1, sx+sw-2) + 0.5
+                ly = random.randint(sy+1, sy+sh-2) + 0.5
+                self.crystal_positions.append((lx, ly))
+            lx = random.randint(sx+1, sx+sw-2) + 0.5
+            ly = random.randint(sy+1, sy+sh-2) + 0.5
+            self.item_spawns.append((lx, ly, 'potion'))
+            added += 1
+
 
     def _set_spawns(self):
         if not self.rooms:

@@ -33,6 +33,14 @@ class Player:
         self.is_attacking = False
         self.attack_anim_timer = 0
 
+        # Charge attack
+        self.is_charging = False
+        self.charge_start_time = 0
+        self.charge_ratio = 0.0   # 0.0 to 1.0
+
+        # Critical hit flash
+        self.crit_flash = 0.0
+
         # Damage flash
         self.damage_flash = 0.0   # 0-1, fades to zero
 
@@ -68,6 +76,13 @@ class Player:
         # Fade damage flash
         if self.damage_flash > 0:
             self.damage_flash = max(0.0, self.damage_flash - dt * 0.003)
+        if self.crit_flash > 0:
+            self.crit_flash = max(0.0, self.crit_flash - dt * 0.006)
+
+        # Update charge ratio
+        if self.is_charging:
+            elapsed = current_time - self.charge_start_time
+            self.charge_ratio = min(1.0, elapsed / 1400)  # full charge in 1.4s
 
         if self.is_moving:
             self.head_bob_phase += dt * 0.015
@@ -210,10 +225,63 @@ class Player:
         sound_mgr.play('attack_whoosh')
         return True
 
+    def start_charge(self, current_time):
+        """Begin charging an attack."""
+        if current_time - self.attack_timer < PLAYER_ATTACK_COOLDOWN:
+            return
+        if not self.is_charging:
+            self.is_charging = True
+            self.charge_start_time = current_time
+            self.charge_ratio = 0.0
+
+    def release_charge(self, enemies, current_time, sound_mgr, dungeon_map=None):
+        """Release a charged attack. Returns True if hit."""
+        if not self.is_charging:
+            return False
+        ratio = self.charge_ratio
+        self.is_charging = False
+        self.charge_ratio = 0.0
+
+        if ratio < 0.1:   # Too short — do a normal attack instead
+            return self.attack_enemies(enemies, current_time, sound_mgr, dungeon_map)
+
+        # Heavy charged blow
+        if current_time - self.attack_timer < PLAYER_ATTACK_COOLDOWN:
+            return False
+        self.attack_timer = current_time
+        self.is_attacking = True
+        self.attack_anim_timer = 350
+        sound_mgr.play('attack_whoosh')
+
+        damage = int(PLAYER_ATTACK_DAMAGE * (1.0 + 2.0 * ratio))
+        hit_any = False
+        for enemy in enemies:
+            if not enemy.alive:
+                continue
+            dx = enemy.x - self.x
+            dy = enemy.y - self.y
+            dist = math.sqrt(dx * dx + dy * dy)
+            if dist > PLAYER_ATTACK_RANGE * (1.0 + ratio * 0.5):  # wider arc at full charge
+                continue
+            angle_to = math.atan2(dy, dx)
+            delta = (angle_to - self.angle + math.pi) % (2 * math.pi) - math.pi
+            if abs(delta) < math.pi / 2.5:
+                enemy.take_damage(damage, sound_mgr, player=self, dungeon_map=dungeon_map)
+                # Heavy knockback
+                if dist > 0:
+                    enemy.vx += (dx / dist) * 0.12 * ratio
+                    enemy.vy += (dy / dist) * 0.12 * ratio
+                hit_any = True
+                if not enemy.alive:
+                    self.enemies_killed += 1
+                    self.score += 50
+        return hit_any
+
     def attack_enemies(self, enemies, current_time, sound_mgr, dungeon_map=None):
         """Damage enemies in attack range and facing direction. Returns True if hit."""
         if not self.try_attack(current_time, sound_mgr):
             return False
+        import random as _rnd
         hit_any = False
         for enemy in enemies:
             if not enemy.alive:
@@ -226,13 +294,17 @@ class Player:
             angle_to = math.atan2(dy, dx)
             delta = (angle_to - self.angle + math.pi) % (2 * math.pi) - math.pi
             if abs(delta) < math.pi / 3:
-                enemy.take_damage(PLAYER_ATTACK_DAMAGE, sound_mgr, player=self,
-                                  dungeon_map=dungeon_map)
+                is_crit = _rnd.random() < 0.2
+                dmg = int(PLAYER_ATTACK_DAMAGE * 2.2) if is_crit else PLAYER_ATTACK_DAMAGE
+                if is_crit:
+                    self.crit_flash = 1.0
+                enemy.take_damage(dmg, sound_mgr, player=self, dungeon_map=dungeon_map)
                 hit_any = True
                 if not enemy.alive:
                     self.enemies_killed += 1
                     self.score += 50
         return hit_any
+
 
     def take_damage(self, amount, sound_mgr):
         self.health = max(0, self.health - amount)

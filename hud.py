@@ -140,11 +140,21 @@ class HUD:
         # Vignette
         self.screen.blit(self.vignette, (0, 0))
 
-        # Damage flash
+        # Damage flash (red)
         if player.damage_flash > 0:
             a = int(player.damage_flash * 120)
             self.damage_surface.fill((180, 0, 0, a))
             self.screen.blit(self.damage_surface, (0, 0))
+
+        # Crit flash (white burst + CRITICAL! text)
+        if player.crit_flash > 0:
+            a = int(player.crit_flash * 160)
+            self.damage_surface.fill((255, 255, 255, a))
+            self.screen.blit(self.damage_surface, (0, 0))
+            if player.crit_flash > 0.5:
+                txt = self.font_lg.render('CRITICAL!', True, (255, 230, 60))
+                txt.set_alpha(int((player.crit_flash - 0.5) * 510))
+                self.screen.blit(txt, (HALF_WIDTH - txt.get_width() // 2, HALF_HEIGHT - 80))
 
         # Attack animation (Weapon)
         if player.is_attacking:
@@ -172,6 +182,7 @@ class HUD:
         self._draw_level(player)
         self._draw_minimap(player, dungeon_map, crystals, enemies, world_items)
         self._draw_crosshair()
+        self._draw_charge_meter(player)
         self._draw_interact_prompt(player, dungeon_map, world_items)
         self._draw_inventory(player)
         self._draw_messages(current_time)
@@ -370,15 +381,31 @@ class HUD:
 
         # Enemies — only show in a small radius around the player
         player_ix, player_iy = int(player.x), int(player.y)
+        current_time_ms = pygame.time.get_ticks()
         for e in enemies:
+            # Corpse puddle: show as dark spot for 10 seconds after death
+            if not e.alive and e.death_pos is not None:
+                age = current_time_ms - e.corpse_timer if e.corpse_timer else 0
+                if age < 10000:
+                    alpha = max(0, int(160 * (1.0 - age / 10000)))
+                    cpx = mx + int(e.death_pos[0] * tile)
+                    cpy = my + int(e.death_pos[1] * tile)
+                    corpse_surf = pygame.Surface((tile * 2, tile), pygame.SRCALPHA)
+                    pygame.draw.ellipse(corpse_surf, (80, 0, 0, alpha), corpse_surf.get_rect())
+                    self.screen.blit(corpse_surf, (cpx - tile, cpy - tile // 2))
+                continue
             if not e.alive:
                 continue
             if abs(int(e.x) - player_ix) <= 6 and abs(int(e.y) - player_iy) <= 6:
-                px = mx + int(e.x * tile)
-                py = my + int(e.y * tile)
+                epx = mx + int(e.x * tile)
+                epy = my + int(e.y * tile)
                 color = getattr(e, 'minimap_color', (255, 60, 60))
-                pygame.draw.circle(self.screen, color,
-                                   (px, py), max(2, tile // 2))
+                pygame.draw.circle(self.screen, color, (epx, epy), max(2, tile // 2))
+                # Alert ! icon
+                if e.alert_timer > 0:
+                    pulse = int(200 + 55 * math.sin(current_time_ms * 0.01))
+                    alert_txt = self.font_sm.render('!', True, (pulse, pulse, 0))
+                    self.screen.blit(alert_txt, (epx - alert_txt.get_width() // 2, epy - tile * 2))
 
         # Player
         px = mx + int(player.x * tile)
@@ -391,7 +418,7 @@ class HUD:
         pygame.draw.line(self.screen, COLOR_MINIMAP_PLAYER,
                          (px, py), (px + dx, py + dy), 2)
 
-    # ── Crosshair ────────────────────────────────────────────────────────
+    # ── Crosshair ───────────────────────────────────────────────────
     def _draw_crosshair(self):
         cx, cy = HALF_WIDTH, HALF_HEIGHT
         color = (200, 200, 220, 150)
@@ -406,6 +433,27 @@ class HUD:
             pygame.draw.line(self.screen, color[:3], (x1, y1), (x2, y2), 2)
         # Centre dot
         pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), 2)
+
+    def _draw_charge_meter(self, player):
+        """Glowing arc around the crosshair showing charge progress."""
+        if not player.is_charging or player.charge_ratio <= 0:
+            return
+        cx, cy = HALF_WIDTH, HALF_HEIGHT
+        ratio = player.charge_ratio
+        radius = 28
+        g = int(220 * (1.0 - ratio))
+        col = (255, g, 60)
+        steps = int(ratio * 48)
+        for i in range(steps):
+            angle = -math.pi / 2 + (i / 48.0) * 2 * math.pi
+            ax = int(cx + radius * math.cos(angle))
+            ay = int(cy + radius * math.sin(angle))
+            pygame.draw.circle(self.screen, col, (ax, ay), 2)
+        if ratio >= 1.0:
+            pulse = pygame.Surface((80, 80), pygame.SRCALPHA)
+            a = int(40 + 30 * math.sin(pygame.time.get_ticks() * 0.015))
+            pygame.draw.circle(pulse, (255, 200, 0, a), (40, 40), 38)
+            self.screen.blit(pulse, (cx - 40, cy - 40))
 
     def _draw_interact_prompt(self, player, dungeon_map, world_items):
         prompt = dungeon_map.get_interact_prompt(

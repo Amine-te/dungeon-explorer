@@ -53,6 +53,7 @@ class Game:
         self.projectiles = []
         self.current_level = 1
         self.hit_stop_timer = 0   # ms remaining in hit-stop freeze
+        self.decals: list[tuple[float, float, int]] = []  # (x, y, birth_ms) blood splatters
 
     # ── Level management ─────────────────────────────────────────────────
     def _start_level(self, level=1):
@@ -73,6 +74,7 @@ class Game:
             WorldPickup(x, y, itype) for x, y, itype in self.dungeon.item_spawns
         ]
         self.projectiles = []
+        self.decals = []
 
         pygame.mouse.set_visible(False)
         pygame.event.set_grab(True)
@@ -162,11 +164,7 @@ class Game:
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.state == STATE_PLAYING:
                 if event.button == 1:
-                    hit = self.player.attack_enemies(
-                        self.enemies, current_time, self.sound_mgr,
-                        self.dungeon)
-                    if hit:
-                        self.hit_stop_timer = 45  # 45 ms freeze on hit
+                    self.player.start_charge(current_time)
                 elif event.button == 3:
                     self.player.try_dodge(current_time)
             elif event.button == 1:
@@ -180,6 +178,17 @@ class Game:
                     if action == 'play':
                         self._start_level(1)
                         self.state = STATE_PLAYING
+
+        if event.type == pygame.MOUSEBUTTONUP:
+            if self.state == STATE_PLAYING and event.button == 1:
+                hit = self.player.release_charge(
+                    self.enemies, current_time, self.sound_mgr, self.dungeon)
+                if hit:
+                    self.hit_stop_timer = 60
+                    # Add blood decal near hit enemies
+                    for e in self.enemies:
+                        if e.hurt_timer > 0:
+                            self.decals.append((e.x, e.y, current_time))
 
     @staticmethod
     def _inventory_slot_from_key(key, unicode_char):
@@ -242,9 +251,16 @@ class Game:
 
         # Player update
         self.player.update(self.dungeon, dt, current_time)
-        
-        # Update Fog of War based on player position
+
+        # Update Fog of War
         self.dungeon.update_visited(self.player.x, self.player.y)
+
+        # Prune old blood decals (> 30 seconds)
+        self.decals = [(x, y, t) for x, y, t in self.decals
+                       if current_time - t < 30000]
+
+        # Ambient sounds
+        self.sound_mgr.play_ambient(current_time, self.dungeon, self.player.x, self.player.y)
 
         # Footstep sounds
         if self.player.is_moving:
@@ -277,6 +293,14 @@ class Game:
             pygame.event.set_grab(False)
             self.state = STATE_GAMEOVER
             return
+
+        # Blood decal on normal attack hit
+        if self.player.is_attacking:
+            for e in self.enemies:
+                if e.hurt_timer > 100:
+                    if not any(abs(dx - e.x) < 0.5 and abs(dy - e.y) < 0.5
+                               for dx, dy, _ in self.decals[-3:]):
+                        self.decals.append((e.x, e.y, current_time))
 
         # ── Render ───────────────────────────────────────────────────
         self.raycaster.cast_rays(self.player, self.dungeon, current_time)

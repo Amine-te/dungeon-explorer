@@ -20,6 +20,7 @@ from settings import (
     ITEM_TORCH_BRIGHTNESS,
 )
 from sprites import get_effective_half_fov
+from dungeon_map import ROOM_TYPE_TINT
 
 # Internal texture kinds (not wall grid values)
 TEX_FLOOR = 'floor'
@@ -249,6 +250,7 @@ class Raycaster:
             wy = py + dist * sin_ray
             tx = (wx * ts).astype(np.int32) & mask
             ty = (wy * ts).astype(np.int32) & mask
+            
             buf[:, y, :] = self._shade_row(
                 self._floor_array[tx, ty], dist, torch_boost)
 
@@ -376,8 +378,24 @@ class Raycaster:
             if side == 1:
                 darkness = int(darkness * 0.75)
 
+            # Room type tint based on the hit tile's floor neighbour
+            hit_wx = ox + math.cos(ray_angle - delta_angle) * depth
+            hit_wy = oy + math.sin(ray_angle - delta_angle) * depth
+            rtype = dungeon_map.get_room_type(hit_wx, hit_wy)
+            tint = ROOM_TYPE_TINT.get(rtype, (0, 0, 0)) if rtype else (0, 0, 0)
+
+            # Secret wall marker: slightly greenish tinge
+            is_secret = False
+            hit_ix, hit_iy = int(ox + math.cos(ray_angle) * depth), int(oy + math.sin(ray_angle) * depth)
+            if (hit_ix, hit_iy) in dungeon_map.secret_walls:
+                is_secret = True
+                tint = (tint[0] - 5, tint[1] + 12, tint[2] - 5)
+
             dark = pygame.Surface((SCALE, wall_h))
-            dark.fill((darkness, darkness, darkness))
+            dr = max(0, min(255, darkness + tint[0]))
+            dg = max(0, min(255, darkness + tint[1]))
+            db = max(0, min(255, darkness + tint[2]))
+            dark.fill((dr, dg, db))
             col.blit(dark, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
 
             # Subtle blue fog for distant walls
