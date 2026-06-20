@@ -68,8 +68,8 @@ ITEM_TORCH_FOV_MULT = 1.45                 # widens field of view
 ITEM_TORCH_BRIGHTNESS = 55                 # added to wall brightness
 
 # ─── Enemy ───────────────────────────────────────────────────────────────────
-ENEMY_SPEED = 0.007                        # base move speed (player walk is 0.008)
-ENEMY_CHASE_SPEED_MULT = 0.72              # slower while pursuing — player can outrun
+ENEMY_SPEED = 0.0055                       # base move speed (player walk is 0.008)
+ENEMY_CHASE_SPEED_MULT = 0.55              # slower while pursuing — player can outrun
 ENEMY_TURN_SPEED = 2.6                     # rad/s — must turn toward target, no instant back-sticks
 ENEMY_ATTACK_ARC = math.pi / 3             # ~60° cone required to land a hit
 ENEMY_STOP_DISTANCE = 0.55                 # hold standoff instead of overlapping the player

@@ -2,7 +2,7 @@
 
 A 2.5D first-person dungeon crawler built entirely in Python using `pygame-ce`. It uses a custom software raycasting engine (accelerated by `numpy`) to render textured 3D environments, complete with sprite billboards generated dynamically from 3D models.
 
-![Game Screenshot](https://via.placeholder.com/800x450.png?text=Dungeon+Explorer) *(Replace with actual screenshot)*
+![Game Screenshot](assets/screenshots/game_screenshot.png)
 
 ## Features
 

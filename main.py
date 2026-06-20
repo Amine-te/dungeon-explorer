@@ -171,8 +171,11 @@ class Game:
                 if self.state == STATE_TITLE:
                     action = self.title_menu.handle_click(event.pos)
                     if action == 'play':
-                        self._start_level(1)
+                        if self.dungeon is None:
+                            self._start_level(1)
                         self.state = STATE_PLAYING
+                        pygame.mouse.set_visible(False)
+                        pygame.event.set_grab(True)
                 elif self.state == STATE_GAMEOVER:
                     action = self.gameover_menu.handle_click(event.pos)
                     if action == 'play':
@@ -222,7 +225,7 @@ class Game:
 
     # ── State updates ────────────────────────────────────────────────────
     def _update_title(self, current_time):
-        self.title_menu.render(current_time)
+        self.title_menu.render(current_time, has_game=(self.dungeon is not None))
 
     def _update_gameover(self, current_time):
         self.gameover_menu.render(

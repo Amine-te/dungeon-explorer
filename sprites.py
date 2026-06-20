@@ -439,7 +439,7 @@ class Enemy:
         self.enemy_type = enemy_type
 
         diff_mult = {'easy': 0.5, 'normal': 1.0, 'hard': 1.5}.get(difficulty, 1.0)
-        diff_speed = (0.7 if difficulty == 'easy'
+        diff_speed = (0.6 if difficulty == 'easy'
                       else (1.2 if difficulty == 'hard' else 1.0))
 
         type_speed = {
@@ -458,7 +458,7 @@ class Enemy:
         self.speed = ENEMY_SPEED * diff_speed * type_speed
         self.damage = ENEMY_DAMAGE * diff_mult
         self.attack_cooldown = ENEMY_ATTACK_COOLDOWN * (
-            1.5 if difficulty == 'easy' else (0.7 if difficulty == 'hard' else 1.0))
+            2.0 if difficulty == 'easy' else (0.8 if difficulty == 'hard' else 1.2))
 
         # Physics & movement
         self.vx = 0.0

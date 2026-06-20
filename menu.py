@@ -311,7 +311,7 @@ class TitleMenu(MenuBase):
             pygame.draw.polygon(surf, (*g['col'], alpha), pts)
             self.screen.blit(surf, (int(g['x'] - s), int(y - s)))
 
-    def render(self, time_ms):
+    def render(self, time_ms, has_game=False):
         if self.settings_panel.open:
             self._draw_background(time_ms)
             self._draw_gems(time_ms)
@@ -324,7 +324,8 @@ class TitleMenu(MenuBase):
         self._draw_title(time_ms)
 
         # PLAY button (large, prominent)
-        self.play_btn = self._draw_button('▶  PLAY', HALF_WIDTH,
+        btn_text = '▶  RESUME' if has_game else '▶  PLAY'
+        self.play_btn = self._draw_button(btn_text, HALF_WIDTH,
                                           SCREEN_HEIGHT // 2 + 15, width=300, height=60)
 
         # Difficulty button
